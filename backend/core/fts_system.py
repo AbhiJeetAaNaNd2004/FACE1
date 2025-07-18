@@ -22,6 +22,7 @@ from urllib3.util.retry import Retry
 from backend.db.db_manager import DatabaseManager
 from backend.db.db_config import create_tables
 from backend.db.db_models import Employee, FaceEmbedding, AttendanceRecord
+from backend.utils.camera_config_loader import load_active_camera_configs, CameraConfig as DBCameraConfig, TripwireConfig as DBTripwireConfig
 from datetime import timedelta
 
 # Global variables for Django integration
@@ -126,23 +127,79 @@ API_CONFIG = {
     'max_retries': 3
 }
 
-CAMERAS = [
-    CameraConfig(
-        camera_id=0,
-        gpu_id=0,
-        camera_type="entry",
-        tripwires=[
-            TripwireConfig(position=0.755551, spacing=0.01, direction="horizontal", name="EntryDetection")],
-        resolution=(1280, 720),
-        fps=15),
-    CameraConfig(
-        camera_id=1,
-        gpu_id=0,
-        camera_type="exit",
-        tripwires=[
-            TripwireConfig(position=0.5, spacing=0.01, direction="vertical", name="EntryDetection")],
-        resolution=(1280, 720),
-        fps=15)]
+def load_camera_configurations() -> List[CameraConfig]:
+    """
+    Load camera configurations from the database
+    
+    Returns:
+        List of active camera configurations from database
+    """
+    try:
+        # Load active camera configurations from database
+        db_camera_configs = load_active_camera_configs()
+        
+        # Convert to the format expected by the FTS system
+        cameras = []
+        for db_config in db_camera_configs:
+            # Convert database tripwires to FTS tripwires
+            tripwires = []
+            for db_tripwire in db_config.tripwires:
+                tripwire = TripwireConfig(
+                    position=db_tripwire.position,
+                    spacing=db_tripwire.spacing,
+                    direction=db_tripwire.direction,
+                    name=db_tripwire.name
+                )
+                tripwires.append(tripwire)
+            
+            # Create FTS camera config with additional fields
+            camera_config = CameraConfig(
+                camera_id=db_config.camera_id,
+                gpu_id=db_config.gpu_id,
+                camera_type=db_config.camera_type,
+                tripwires=tripwires,
+                resolution=db_config.resolution,
+                fps=db_config.fps
+            )
+            
+            # Add additional fields that may be needed for camera access
+            camera_config.stream_url = getattr(db_config, 'stream_url', None)
+            camera_config.ip_address = getattr(db_config, 'ip_address', None)
+            camera_config.username = getattr(db_config, 'username', None)
+            camera_config.password = getattr(db_config, 'password', None)
+            camera_config.camera_name = getattr(db_config, 'camera_name', f"Camera {db_config.camera_id}")
+            cameras.append(camera_config)
+        
+        if not cameras:
+            # Fallback to default configuration if no cameras in database
+            log_message("No active cameras found in database, using default configuration")
+            cameras = [
+                CameraConfig(
+                    camera_id=0,
+                    gpu_id=0,
+                    camera_type="entry",
+                    tripwires=[
+                        TripwireConfig(position=0.755551, spacing=0.01, direction="horizontal", name="EntryDetection")],
+                    resolution=(1280, 720),
+                    fps=15)
+            ]
+        
+        log_message(f"Loaded {len(cameras)} camera configurations from database")
+        return cameras
+        
+    except Exception as e:
+        log_message(f"Error loading camera configurations: {e}")
+        # Return default configuration on error
+        return [
+            CameraConfig(
+                camera_id=0,
+                gpu_id=0,
+                camera_type="entry",
+                tripwires=[
+                    TripwireConfig(position=0.755551, spacing=0.01, direction="horizontal", name="EntryDetection")],
+                resolution=(1280, 720),
+                fps=15)
+        ]
 
 def load_employee_metadata(employee_id: str) -> Optional[EmployeeMetadata]:
     emp_folder = os.path.join(known_faces_dir, employee_id)
@@ -482,7 +539,9 @@ class FaceTrackingSystem:
                             present_users_by_department[dept].append(emp_id)
             
             # Update other stats
-            system_stats["cam_count"] = len(CAMERAS)
+            # Load camera configurations from database
+        cameras = load_camera_configurations()
+        system_stats["cam_count"] = len(cameras)
             system_stats["faces_detected"] = len(active_tracks)
             system_stats["attendance_count"] = len(latest_attendance)
             
@@ -1251,9 +1310,23 @@ class FaceTrackingSystem:
                 cv2.putText(frame, tripwire.name, (10, tripwire1_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
     def process_camera(self, camera_config: CameraConfig):
-        cap = cv2.VideoCapture(camera_config.camera_id)
+        # Try to determine camera source - could be camera ID, IP address, or stream URL
+        camera_source = camera_config.camera_id
+        
+        # If we have a stream URL from the database config, use it
+        if hasattr(camera_config, 'stream_url') and camera_config.stream_url:
+            camera_source = camera_config.stream_url
+            log_message(f"[Camera {camera_config.camera_id}] Using stream URL: {camera_source}")
+        elif hasattr(camera_config, 'ip_address') and camera_config.ip_address:
+            # Try to construct RTSP URL from IP address
+            camera_source = f"rtsp://{camera_config.ip_address}:554/stream1"
+            log_message(f"[Camera {camera_config.camera_id}] Using constructed RTSP URL: {camera_source}")
+        else:
+            log_message(f"[Camera {camera_config.camera_id}] Using camera ID: {camera_source}")
+        
+        cap = cv2.VideoCapture(camera_source)
         if not cap.isOpened():
-            log_message(f"[ERROR] Cannot open camera {camera_config.camera_id}")
+            log_message(f"[ERROR] Cannot open camera {camera_config.camera_id} with source: {camera_source}")
             return
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         cap.set(cv2.CAP_PROP_FPS, camera_config.fps)
@@ -1354,7 +1427,11 @@ class FaceTrackingSystem:
 
     def start_multi_camera_tracking(self):
         try:
-            for camera_config in CAMERAS:
+            # Load camera configurations from database
+            cameras = load_camera_configurations()
+            log_message(f"Starting tracking for {len(cameras)} cameras")
+            
+            for camera_config in cameras:
                 thread = threading.Thread(
                     target=self.process_camera,
                     args=(camera_config,),
@@ -1380,6 +1457,35 @@ class FaceTrackingSystem:
         for thread in self.camera_threads:
             if thread.is_alive():
                 thread.join(timeout=2)
+    
+    def reload_camera_configurations(self):
+        """
+        Reload camera configurations from database and restart tracking
+        """
+        log_message("Reloading camera configurations from database...")
+        
+        # Stop current tracking
+        self.shutdown()
+        
+        # Clear existing threads
+        self.camera_threads.clear()
+        
+        # Reset shutdown flag
+        self.shutdown_flag.clear()
+        
+        # Start tracking with new configurations
+        self.start_multi_camera_tracking()
+        
+        log_message("Camera configurations reloaded successfully")
+    
+    def get_active_camera_configs(self) -> List[CameraConfig]:
+        """
+        Get current active camera configurations
+        
+        Returns:
+            List of active camera configurations
+        """
+        return load_camera_configurations()
 
     def get_identity_info(self, face):
         embedding = face.embedding.astype('float32')
@@ -1445,6 +1551,20 @@ class FaceTrackingPipeline:
         """Get last seen location for an employee"""
         record = self.system.db_manager.get_latest_attendance_by_employee(employee_id)
         return record.camera_id if record else None
+    
+    def reload_camera_configurations(self):
+        """Reload camera configurations from database"""
+        if self.system:
+            self.system.reload_camera_configurations()
+            log_message("[Pipeline] Camera configurations reloaded from database")
+        else:
+            log_message("[Pipeline] System not initialized, cannot reload configurations")
+    
+    def get_active_camera_configs(self):
+        """Get current active camera configurations"""
+        if self.system:
+            return self.system.get_active_camera_configs()
+        return []
 def start_tracking_service():
     """Start the face tracking system as a service"""
     global system_instance, is_tracking_running, start_time

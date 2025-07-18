@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
 from db_config import SessionLocal
-from db_models import Employee, FaceEmbedding, AttendanceRecord, Role, TrackingRecord, SystemLog, User
+from db_models import Employee, FaceEmbedding, AttendanceRecord, Role, TrackingRecord, SystemLog, User, CameraConfig, Tripwire
 import numpy as np
 import pickle
 import logging
@@ -167,24 +167,379 @@ class DatabaseManager:
                 session.close()
 
     def log_attendance(self, employee_id: str, camera_id: int, event_type: str, confidence_score: float = 0.0, work_status: str = 'working', notes: str = None) -> bool:
+        """Log attendance record for an employee"""
         session = None
         try:
             session = self.Session()
+            
+            # Create attendance record
             attendance_record = AttendanceRecord(
                 employee_id=employee_id,
                 camera_id=camera_id,
                 event_type=event_type,
                 confidence_score=confidence_score,
                 work_status=work_status,
-                notes=notes)
+                notes=notes
+            )
+            
             session.add(attendance_record)
             session.commit()
             return True
+            
         except Exception as e:
             if session:
                 session.rollback()
             self.logger.error(f"Error logging attendance for {employee_id}: {e}")
             return False
+        finally:
+            if session:
+                session.close()
+
+    # Camera Management Methods
+    def create_camera(self, camera_data: dict) -> Optional[CameraConfig]:
+        """Create a new camera configuration"""
+        session = None
+        try:
+            session = self.Session()
+            
+            # Get the next available camera_id
+            max_camera_id = session.query(func.max(CameraConfig.camera_id)).scalar()
+            next_camera_id = (max_camera_id + 1) if max_camera_id is not None else 1
+            
+            camera = CameraConfig(
+                camera_id=next_camera_id,
+                camera_name=camera_data['camera_name'],
+                camera_type=camera_data.get('camera_type', 'general'),
+                ip_address=camera_data.get('ip_address'),
+                stream_url=camera_data.get('stream_url'),
+                username=camera_data.get('username'),
+                password=camera_data.get('password'),
+                resolution_width=camera_data.get('resolution_width', 1920),
+                resolution_height=camera_data.get('resolution_height', 1080),
+                fps=camera_data.get('fps', 30),
+                gpu_id=camera_data.get('gpu_id', 0),
+                status=camera_data.get('status', 'discovered'),
+                is_active=camera_data.get('is_active', False),
+                location_description=camera_data.get('location_description'),
+                manufacturer=camera_data.get('manufacturer'),
+                model=camera_data.get('model'),
+                firmware_version=camera_data.get('firmware_version'),
+                onvif_supported=camera_data.get('onvif_supported', False)
+            )
+            
+            session.add(camera)
+            session.commit()
+            session.refresh(camera)
+            
+            self.logger.info(f"Created camera {camera.camera_id}: {camera.camera_name}")
+            return camera
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error creating camera: {e}")
+            return None
+        finally:
+            if session:
+                session.close()
+
+    def get_camera(self, camera_id: int) -> Optional[CameraConfig]:
+        """Get camera configuration by ID"""
+        session = None
+        try:
+            session = self.Session()
+            return session.query(CameraConfig).filter(CameraConfig.camera_id == camera_id).first()
+        except Exception as e:
+            self.logger.error(f"Error getting camera {camera_id}: {e}")
+            return None
+        finally:
+            if session:
+                session.close()
+
+    def get_all_cameras(self) -> List[CameraConfig]:
+        """Get all camera configurations"""
+        session = None
+        try:
+            session = self.Session()
+            return session.query(CameraConfig).all()
+        except Exception as e:
+            self.logger.error(f"Error getting all cameras: {e}")
+            return []
+        finally:
+            if session:
+                session.close()
+
+    def get_active_cameras(self) -> List[CameraConfig]:
+        """Get all active camera configurations"""
+        session = None
+        try:
+            session = self.Session()
+            return session.query(CameraConfig).filter(CameraConfig.is_active == True).all()
+        except Exception as e:
+            self.logger.error(f"Error getting active cameras: {e}")
+            return []
+        finally:
+            if session:
+                session.close()
+
+    def get_cameras_by_status(self, status: str) -> List[CameraConfig]:
+        """Get cameras by status"""
+        session = None
+        try:
+            session = self.Session()
+            return session.query(CameraConfig).filter(CameraConfig.status == status).all()
+        except Exception as e:
+            self.logger.error(f"Error getting cameras by status {status}: {e}")
+            return []
+        finally:
+            if session:
+                session.close()
+
+    def update_camera(self, camera_id: int, update_data: dict) -> Optional[CameraConfig]:
+        """Update camera configuration"""
+        session = None
+        try:
+            session = self.Session()
+            camera = session.query(CameraConfig).filter(CameraConfig.camera_id == camera_id).first()
+            
+            if not camera:
+                return None
+            
+            # Update fields
+            for field, value in update_data.items():
+                if hasattr(camera, field) and value is not None:
+                    setattr(camera, field, value)
+            
+            session.commit()
+            session.refresh(camera)
+            
+            self.logger.info(f"Updated camera {camera_id}")
+            return camera
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error updating camera {camera_id}: {e}")
+            return None
+        finally:
+            if session:
+                session.close()
+
+    def delete_camera(self, camera_id: int) -> bool:
+        """Delete camera configuration"""
+        session = None
+        try:
+            session = self.Session()
+            camera = session.query(CameraConfig).filter(CameraConfig.camera_id == camera_id).first()
+            
+            if not camera:
+                return False
+            
+            session.delete(camera)
+            session.commit()
+            
+            self.logger.info(f"Deleted camera {camera_id}")
+            return True
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error deleting camera {camera_id}: {e}")
+            return False
+        finally:
+            if session:
+                session.close()
+
+    def activate_camera(self, camera_id: int, is_active: bool = True) -> bool:
+        """Activate or deactivate a camera"""
+        session = None
+        try:
+            session = self.Session()
+            camera = session.query(CameraConfig).filter(CameraConfig.camera_id == camera_id).first()
+            
+            if not camera:
+                return False
+            
+            camera.is_active = is_active
+            camera.status = 'active' if is_active else 'inactive'
+            
+            session.commit()
+            
+            self.logger.info(f"{'Activated' if is_active else 'Deactivated'} camera {camera_id}")
+            return True
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error activating camera {camera_id}: {e}")
+            return False
+        finally:
+            if session:
+                session.close()
+
+    # Tripwire Management Methods
+    def create_tripwire(self, camera_id: int, tripwire_data: dict) -> Optional[Tripwire]:
+        """Create a new tripwire for a camera"""
+        session = None
+        try:
+            session = self.Session()
+            
+            # Verify camera exists
+            camera = session.query(CameraConfig).filter(CameraConfig.camera_id == camera_id).first()
+            if not camera:
+                return None
+            
+            tripwire = Tripwire(
+                camera_id=camera_id,
+                name=tripwire_data['name'],
+                position=tripwire_data['position'],
+                spacing=tripwire_data.get('spacing', 0.01),
+                direction=tripwire_data['direction'],
+                detection_type=tripwire_data.get('detection_type', 'entry'),
+                is_active=tripwire_data.get('is_active', True)
+            )
+            
+            session.add(tripwire)
+            session.commit()
+            session.refresh(tripwire)
+            
+            self.logger.info(f"Created tripwire {tripwire.id} for camera {camera_id}")
+            return tripwire
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error creating tripwire for camera {camera_id}: {e}")
+            return None
+        finally:
+            if session:
+                session.close()
+
+    def get_camera_tripwires(self, camera_id: int) -> List[Tripwire]:
+        """Get all tripwires for a camera"""
+        session = None
+        try:
+            session = self.Session()
+            return session.query(Tripwire).filter(Tripwire.camera_id == camera_id).all()
+        except Exception as e:
+            self.logger.error(f"Error getting tripwires for camera {camera_id}: {e}")
+            return []
+        finally:
+            if session:
+                session.close()
+
+    def update_tripwire(self, tripwire_id: int, update_data: dict) -> Optional[Tripwire]:
+        """Update tripwire configuration"""
+        session = None
+        try:
+            session = self.Session()
+            tripwire = session.query(Tripwire).filter(Tripwire.id == tripwire_id).first()
+            
+            if not tripwire:
+                return None
+            
+            # Update fields
+            for field, value in update_data.items():
+                if hasattr(tripwire, field) and value is not None:
+                    setattr(tripwire, field, value)
+            
+            session.commit()
+            session.refresh(tripwire)
+            
+            self.logger.info(f"Updated tripwire {tripwire_id}")
+            return tripwire
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error updating tripwire {tripwire_id}: {e}")
+            return None
+        finally:
+            if session:
+                session.close()
+
+    def delete_tripwire(self, tripwire_id: int) -> bool:
+        """Delete tripwire"""
+        session = None
+        try:
+            session = self.Session()
+            tripwire = session.query(Tripwire).filter(Tripwire.id == tripwire_id).first()
+            
+            if not tripwire:
+                return False
+            
+            session.delete(tripwire)
+            session.commit()
+            
+            self.logger.info(f"Deleted tripwire {tripwire_id}")
+            return True
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error deleting tripwire {tripwire_id}: {e}")
+            return False
+        finally:
+            if session:
+                session.close()
+
+    def bulk_create_cameras_from_discovery(self, discovered_cameras: List[dict]) -> List[CameraConfig]:
+        """Bulk create cameras from discovery results"""
+        session = None
+        created_cameras = []
+        
+        try:
+            session = self.Session()
+            
+            for camera_data in discovered_cameras:
+                # Check if camera already exists by IP
+                existing = session.query(CameraConfig).filter(
+                    CameraConfig.ip_address == camera_data['ip_address']
+                ).first()
+                
+                if existing:
+                    self.logger.info(f"Camera at {camera_data['ip_address']} already exists, skipping")
+                    continue
+                
+                # Get the next available camera_id
+                max_camera_id = session.query(func.max(CameraConfig.camera_id)).scalar()
+                next_camera_id = (max_camera_id + 1) if max_camera_id is not None else 1
+                
+                camera = CameraConfig(
+                    camera_id=next_camera_id,
+                    camera_name=f"Camera {camera_data['ip_address']}",
+                    camera_type='general',
+                    ip_address=camera_data['ip_address'],
+                    stream_url=camera_data.get('stream_urls', [None])[0],
+                    resolution_width=1920,
+                    resolution_height=1080,
+                    fps=30,
+                    gpu_id=0,
+                    status='discovered',
+                    is_active=False,
+                    manufacturer=camera_data.get('manufacturer', 'Unknown'),
+                    model=camera_data.get('model', 'Unknown'),
+                    firmware_version=camera_data.get('firmware_version', 'Unknown'),
+                    onvif_supported=camera_data.get('onvif_supported', False)
+                )
+                
+                session.add(camera)
+                created_cameras.append(camera)
+            
+            session.commit()
+            
+            # Refresh all created cameras
+            for camera in created_cameras:
+                session.refresh(camera)
+            
+            self.logger.info(f"Bulk created {len(created_cameras)} cameras from discovery")
+            return created_cameras
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            self.logger.error(f"Error bulk creating cameras: {e}")
+            return []
         finally:
             if session:
                 session.close()

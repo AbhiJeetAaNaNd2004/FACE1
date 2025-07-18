@@ -88,13 +88,44 @@ class CameraConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     camera_id = Column(Integer, unique=True, nullable=False)
     camera_name = Column(String, nullable=False)
-    camera_type = Column(String, default='entry')
+    camera_type = Column(String, default='entry')  # 'entry', 'exit', 'general'
+    ip_address = Column(String, nullable=True)  # Camera IP address
+    stream_url = Column(String, nullable=True)  # RTSP/HTTP stream URL
+    username = Column(String, nullable=True)  # Camera authentication
+    password = Column(String, nullable=True)  # Camera authentication
     resolution_width = Column(Integer, default=1920)
     resolution_height = Column(Integer, default=1080)
     fps = Column(Integer, default=30)
+    gpu_id = Column(Integer, default=0)  # GPU assignment for processing
+    status = Column(String, default='discovered')  # 'discovered', 'configured', 'active', 'inactive'
+    is_active = Column(Boolean, default=False)
+    location_description = Column(String, nullable=True)  # Human-readable location
+    manufacturer = Column(String, nullable=True)  # Camera manufacturer
+    model = Column(String, nullable=True)  # Camera model
+    firmware_version = Column(String, nullable=True)  # Camera firmware
+    onvif_supported = Column(Boolean, default=False)  # ONVIF support flag
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    tripwires = relationship("Tripwire", back_populates="camera", cascade="all, delete-orphan")
+
+class Tripwire(Base):
+    __tablename__ = 'tripwires'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    camera_id = Column(Integer, ForeignKey('camera_configs.camera_id'), nullable=False)
+    name = Column(String, nullable=False)  # Tripwire name/identifier
+    position = Column(Float, nullable=False)  # Position (0.0 to 1.0)
+    spacing = Column(Float, default=0.01)  # Spacing for detection
+    direction = Column(String, nullable=False)  # 'horizontal', 'vertical'
+    detection_type = Column(String, default='entry')  # 'entry', 'exit', 'counting'
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    camera = relationship("CameraConfig", back_populates="tripwires")
 
 class SystemLog(Base):
     __tablename__ = 'system_logs'
