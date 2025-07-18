@@ -63,3 +63,60 @@ All imports have been verified to work correctly with the expected project struc
 7. `backend/db/db_manager.py` (imports and class names fixed)
 
 All import issues have been resolved and the project should now have a clean, consistent import structure.
+
+## Troubleshooting the Specific Error
+
+If you're still getting the error:
+```
+ImportError: cannot import name 'Tripwire' from 'db_models'
+```
+
+This is likely due to one of these issues:
+
+### 1. Python Cache Issue
+The most common cause is outdated Python bytecode cache. To fix:
+```bash
+# Clear Python cache
+python -Bc "import shutil; shutil.rmtree('__pycache__', ignore_errors=True)"
+
+# Or manually delete cache directories
+find . -name "__pycache__" -type d -exec rm -rf {} +
+find . -name "*.pyc" -delete
+```
+
+### 2. Conflicting db_models.py File
+The error traceback shows it's trying to import from a different `db_models.py` file:
+```
+D:\Python Course\SEDL AI\insightface-env\db_models.py
+```
+
+But your project structure has it at:
+```
+D:\Python Course\SEDL AI\insightface-env\FACE1.1\backend\db\db_models.py
+```
+
+**Solution**: Remove or rename any `db_models.py` file in your virtual environment root directory.
+
+### 3. IDE/Editor Cache
+If using an IDE like PyCharm, VS Code, etc.:
+- Restart your IDE
+- Clear IDE cache
+- Reload the project
+
+### 4. Virtual Environment Issues
+Make sure you're running from the correct directory and your virtual environment is activated:
+```bash
+# Make sure you're in the project root
+cd "D:\Python Course\SEDL AI\insightface-env\FACE1.1"
+
+# Run the verification script
+python verify_imports.py
+```
+
+### 5. Verification Script
+Run the included `verify_imports.py` script to diagnose the exact issue:
+```bash
+python verify_imports.py
+```
+
+This will show you exactly which imports are failing and provide specific guidance.
