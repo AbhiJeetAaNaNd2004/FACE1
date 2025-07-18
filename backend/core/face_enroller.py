@@ -5,9 +5,9 @@ import logging
 from datetime import datetime
 from typing import List, Union, Optional
 from insightface.app import FaceAnalysis
-from backend.db.db_manager import DatabaseManager
-from backend.db.db_models import FaceEmbedding
-from fts_system import reload_embeddings_and_rebuild_index
+from db.db_manager import DatabaseManager
+from db.db_models import FaceEmbedding
+from .fts_system import reload_embeddings_and_rebuild_index
 
 class FaceEnrollmentError(Exception):
     pass
