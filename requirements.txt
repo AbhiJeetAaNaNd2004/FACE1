@@ -18,6 +18,12 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 
+# Camera discovery and ONVIF
+requests==2.31.0
+lxml==4.9.3
+zeep==4.2.1
+onvif-zeep==0.2.12
+
 # Face recognition (optional for development)
 # Uncomment these for actual face recognition functionality
 # opencv-python==4.8.1.78
