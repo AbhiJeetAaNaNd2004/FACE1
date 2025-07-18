@@ -1,190 +1,301 @@
-from fastapi import APIRouter, HTTPException, Depends
-from db.db_manager import DatabaseManager
-from routers.auth import verify_token
-from pydantic import BaseModel
-from typing import List, Optional
-import logging
+"""
+Employee management router
+"""
 
-logger = logging.getLogger(__name__)
+import base64
+import os
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from sqlalchemy.orm import Session
+from datetime import datetime
 
-router = APIRouter(prefix="/employees", tags=["Employees"])
+from app.config import settings
+from app.schemas import (
+    Employee, EmployeeCreate, EmployeeUpdate, MessageResponse,
+    EmployeeEnrollmentRequest, PresentEmployeesResponse, CurrentUser
+)
+from app.security import (
+    require_admin_or_above, require_employee_or_above, 
+    get_current_active_user, check_employee_access
+)
+from db.db_config import get_db
+from db.db_models import Employee as EmployeeModel, FaceEmbedding, AttendanceLog
 
-# --- Role-based access control ---
-def require_admin(token_data=Depends(verify_token)):
-    if token_data.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+router = APIRouter(prefix="/employees", tags=["Employee Management"])
 
-# --- Singleton DB Dependency ---
-db_manager_instance = None
-
-def get_db_manager():
-    global db_manager_instance
-    if db_manager_instance is None:
-        db_manager_instance = DatabaseManager()
-    return db_manager_instance
-
-# --- Pydantic Schemas ---
-class EmployeeResponse(BaseModel):
-    employee_id: str
-    name: str
-    department: Optional[str] = None
-    designation: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-class EmployeeCreateRequest(BaseModel):
-    employee_id: str
-    name: str
-    department: Optional[str] = None
-    designation: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-
-class EmployeeUpdateRequest(BaseModel):
-    name: Optional[str]
-    department: Optional[str]
-    designation: Optional[str]
-    email: Optional[str]
-    phone: Optional[str]
-
-class DeleteResponse(BaseModel):
-    deleted: bool
-    message: str = ""
-
-# --- CRUD Routes ---
-
-@router.get("/", response_model=List[EmployeeResponse])
-def list_employees(
-    db: DatabaseManager = Depends(get_db_manager),
-    _=Depends(verify_token)
+@router.post("/enroll", response_model=MessageResponse)
+async def enroll_employee(
+    enrollment_data: EmployeeEnrollmentRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
 ):
+    """
+    Enroll employee with face data (Admin+ only)
+    """
+    # Check if employee already exists
+    existing_employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == enrollment_data.employee.employee_id
+    ).first()
+    
+    if existing_employee:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Employee already exists"
+        )
+    
+    # Create employee record
+    new_employee = EmployeeModel(
+        employee_id=enrollment_data.employee.employee_id,
+        name=enrollment_data.employee.name,
+        department=enrollment_data.employee.department,
+        role=enrollment_data.employee.role,
+        date_joined=enrollment_data.employee.date_joined,
+        email=enrollment_data.employee.email,
+        phone=enrollment_data.employee.phone
+    )
+    
+    db.add(new_employee)
+    db.flush()  # Flush to get the employee in the session
+    
+    # Process face image and create embedding
     try:
-        employees = db.get_all_employees()
-        return [EmployeeResponse(
-            employee_id=emp.id,
-            name=emp.employee_name,
-            department=emp.department,
-            designation=emp.designation,
-            email=emp.email,
-            phone=emp.phone,
-            created_at=str(emp.created_at),
-            updated_at=str(emp.updated_at)
-        ) for emp in employees]
+        # Create directories if they don't exist
+        face_images_dir = os.path.join(settings.UPLOAD_DIR, settings.FACE_IMAGES_DIR)
+        os.makedirs(face_images_dir, exist_ok=True)
+        
+        # Decode base64 image
+        image_data = base64.b64decode(enrollment_data.image_data)
+        
+        # Save image file
+        image_filename = f"{enrollment_data.employee.employee_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        image_path = os.path.join(face_images_dir, image_filename)
+        
+        with open(image_path, "wb") as f:
+            f.write(image_data)
+        
+        # For now, create a mock embedding (in real implementation, use face_recognition library)
+        mock_embedding = b"mock_embedding_data_" + enrollment_data.employee.employee_id.encode()
+        
+        # Create face embedding record
+        face_embedding = FaceEmbedding(
+            employee_id=enrollment_data.employee.employee_id,
+            image_path=image_path,
+            embedding_vector=mock_embedding,
+            quality_score=0.95  # Mock quality score
+        )
+        
+        db.add(face_embedding)
+        db.commit()
+        
+        return MessageResponse(
+            message=f"Employee '{enrollment_data.employee.name}' enrolled successfully"
+        )
+        
     except Exception as e:
-        logger.exception("Error listing employees")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process face data: {str(e)}"
+        )
 
+@router.get("/", response_model=List[Employee])
+async def list_employees(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_employee_or_above)
+):
+    """
+    List all employees (any authenticated user)
+    """
+    employees = db.query(EmployeeModel).filter(EmployeeModel.is_active == True).all()
+    return employees
 
-@router.get("/{employee_id}", response_model=EmployeeResponse)
-def get_employee(
+@router.get("/{employee_id}", response_model=Employee)
+async def get_employee(
     employee_id: str,
-    db: DatabaseManager = Depends(get_db_manager),
-    _=Depends(verify_token)
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
-    try:
-        emp = db.get_employee(employee_id)
-        if not emp:
-            raise HTTPException(status_code=404, detail="Employee not found")
-        return EmployeeResponse(
-            employee_id=emp.id,
-            name=emp.employee_name,
-            department=emp.department,
-            designation=emp.designation,
-            email=emp.email,
-            phone=emp.phone,
-            created_at=str(emp.created_at),
-            updated_at=str(emp.updated_at)
+    """
+    Get specific employee details
+    """
+    # Check access permissions
+    check_employee_access(employee_id, current_user)
+    
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == employee_id
+    ).first()
+    
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found"
         )
-    except Exception as e:
-        logger.exception("Error getting employee")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    
+    return employee
 
-
-@router.post("/", response_model=EmployeeResponse)
-def create_employee(
-    request: EmployeeCreateRequest,
-    db: DatabaseManager = Depends(get_db_manager),
-    _=Depends(require_admin)
-):
-    try:
-        created = db.create_employee(
-            employee_id=request.employee_id,
-            employee_name=request.name,
-            department=request.department,
-            designation=request.designation,
-            email=request.email,
-            phone=request.phone
-        )
-        if not created:
-            raise HTTPException(status_code=400, detail="Employee already exists")
-        emp = db.get_employee(request.employee_id)
-        return EmployeeResponse(
-            employee_id=emp.id,
-            name=emp.employee_name,
-            department=emp.department,
-            designation=emp.designation,
-            email=emp.email,
-            phone=emp.phone,
-            created_at=str(emp.created_at),
-            updated_at=str(emp.updated_at)
-        )
-    except Exception as e:
-        logger.exception("Error creating employee")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.put("/{employee_id}", response_model=EmployeeResponse)
-def update_employee(
+@router.put("/{employee_id}", response_model=MessageResponse)
+async def update_employee(
     employee_id: str,
-    request: EmployeeUpdateRequest,
-    db: DatabaseManager = Depends(get_db_manager),
-    _=Depends(require_admin)
+    employee_update: EmployeeUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
 ):
-    try:
-        emp = db.get_employee(employee_id)
-        if not emp:
-            raise HTTPException(status_code=404, detail="Employee not found")
+    """
+    Update employee information (Admin+ only)
+    """
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == employee_id
+    ).first()
+    
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found"
+        )
+    
+    # Update fields
+    update_data = employee_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(employee, field, value)
+    
+    employee.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return MessageResponse(message=f"Employee '{employee.name}' updated successfully")
 
-        # Update in DB (assumes you'll implement an update_employee method in DB)
-        db.update_employee(
+@router.delete("/{employee_id}", response_model=MessageResponse)
+async def delete_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
+):
+    """
+    Delete employee (Admin+ only)
+    """
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == employee_id
+    ).first()
+    
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found"
+        )
+    
+    # Soft delete
+    employee.is_active = False
+    employee.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return MessageResponse(message=f"Employee '{employee.name}' deleted successfully")
+
+@router.get("/present/current", response_model=PresentEmployeesResponse)
+async def get_present_employees(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_employee_or_above)
+):
+    """
+    Get currently present employees (any authenticated user)
+    """
+    # Get employees who have a 'present' status in their latest attendance log
+    from sqlalchemy import func, and_
+    
+    # Subquery to get the latest attendance log for each employee
+    latest_attendance_subquery = db.query(
+        AttendanceLog.employee_id,
+        func.max(AttendanceLog.timestamp).label('latest_timestamp')
+    ).group_by(AttendanceLog.employee_id).subquery()
+    
+    # Query to get employees with 'present' status in their latest log
+    present_employees = db.query(EmployeeModel).join(
+        AttendanceLog,
+        EmployeeModel.employee_id == AttendanceLog.employee_id
+    ).join(
+        latest_attendance_subquery,
+        and_(
+            AttendanceLog.employee_id == latest_attendance_subquery.c.employee_id,
+            AttendanceLog.timestamp == latest_attendance_subquery.c.latest_timestamp
+        )
+    ).filter(
+        and_(
+            AttendanceLog.status == 'present',
+            EmployeeModel.is_active == True
+        )
+    ).all()
+    
+    return PresentEmployeesResponse(
+        present_employees=present_employees,
+        total_count=len(present_employees)
+    )
+
+@router.post("/{employee_id}/face-image", response_model=MessageResponse)
+async def upload_face_image(
+    employee_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
+):
+    """
+    Upload additional face image for employee (Admin+ only)
+    """
+    # Check if employee exists
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == employee_id
+    ).first()
+    
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found"
+        )
+    
+    # Validate file type
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an image"
+        )
+    
+    # Check file size
+    if file.size > settings.MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes"
+        )
+    
+    try:
+        # Create directories if they don't exist
+        face_images_dir = os.path.join(settings.UPLOAD_DIR, settings.FACE_IMAGES_DIR)
+        os.makedirs(face_images_dir, exist_ok=True)
+        
+        # Save uploaded file
+        image_filename = f"{employee_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+        image_path = os.path.join(face_images_dir, image_filename)
+        
+        with open(image_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Create mock embedding (in real implementation, use face_recognition library)
+        mock_embedding = b"mock_embedding_data_" + employee_id.encode() + b"_" + str(datetime.now().timestamp()).encode()
+        
+        # Create face embedding record
+        face_embedding = FaceEmbedding(
             employee_id=employee_id,
-            name=request.name,
-            department=request.department,
-            designation=request.designation,
-            email=request.email,
-            phone=request.phone
+            image_path=image_path,
+            embedding_vector=mock_embedding,
+            quality_score=0.90  # Mock quality score
         )
-
-        emp = db.get_employee(employee_id)
-        return EmployeeResponse(
-            employee_id=emp.id,
-            name=emp.employee_name,
-            department=emp.department,
-            designation=emp.designation,
-            email=emp.email,
-            phone=emp.phone,
-            created_at=str(emp.created_at),
-            updated_at=str(emp.updated_at)
+        
+        db.add(face_embedding)
+        db.commit()
+        
+        return MessageResponse(
+            message=f"Face image uploaded successfully for employee '{employee.name}'"
         )
+        
     except Exception as e:
-        logger.exception("Error updating employee")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.delete("/{employee_id}", response_model=DeleteResponse)
-def delete_employee(
-    employee_id: str,
-    db: DatabaseManager = Depends(get_db_manager),
-    _=Depends(require_admin)
-):
-    try:
-        success = db.delete_employee(employee_id)
-        return DeleteResponse(
-            deleted=success,
-            message="Employee deleted" if success else "Employee not found"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload face image: {str(e)}"
         )
-    except Exception as e:
-        logger.exception("Error deleting employee")
-        raise HTTPException(status_code=500, detail="Internal server error")

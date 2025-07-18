@@ -1,146 +1,182 @@
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.concurrency import run_in_threadpool
-from core.face_enroller import FaceEnroller
-from core.fts_system import FaceTrackingPipeline
-from pydantic import BaseModel
-import numpy as np
-import cv2
-import logging
-import os
-import jwt
+"""
+Face embeddings management router
+"""
 
-# Setup logging
-logger = logging.getLogger(__name__)
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
-# Security setup
-SECRET_KEY = os.getenv("SECRET_KEY", "insecure-default")
-ALGORITHM = "HS256"
-security = HTTPBearer()
+from app.schemas import FaceEmbedding, MessageResponse, CurrentUser
+from app.security import require_admin_or_above, get_current_active_user
+from db.db_config import get_db
+from db.db_models import FaceEmbedding as FaceEmbeddingModel, Employee as EmployeeModel
 
-# JWT Verification & Role Control
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("status") != "active":
-            raise HTTPException(status_code=403, detail="Account suspended or inactive")
-        return payload
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+router = APIRouter(prefix="/embeddings", tags=["Face Embeddings"])
 
-
-def require_admin(token_data=Depends(verify_token)):
-    if token_data.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    return token_data
-
-
-# Response schema
-class EnrollmentResponse(BaseModel):
-    success: bool
-    message: str = ""
-
-
-# Router setup
-router = APIRouter(prefix="/embeddings", tags=["Embeddings"])
-
-
-# Dependency Management: Singleton Pattern
-class EnrollerSingleton:
-    instance = None
-
-    @classmethod
-    def get_instance(cls):
-        if cls.instance is None:
-            pipeline = FaceTrackingPipeline()
-            cls.instance = FaceEnroller(tracking_system=pipeline.system)
-        return cls.instance
-
-
-# Image processing helper
-def process_image_from_upload(file_bytes: bytes) -> np.ndarray:
-    np_array = np.frombuffer(file_bytes, np.uint8)
-    return cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-
-
-# API Endpoints
-
-@router.post("/enroll/", response_model=EnrollmentResponse)
-async def enroll_employee(
-    employee_id: str = Form(...),
-    employee_name: str = Form(...),
-    update_existing: bool = Form(False),
-    files: list[UploadFile] = File(...),
-    _=Depends(require_admin),
-    enroller: FaceEnroller = Depends(EnrollerSingleton.get_instance)
+@router.get("/", response_model=List[FaceEmbedding])
+async def list_embeddings(
+    employee_id: str = None,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
 ):
-    try:
-        images = []
-        for file in files:
-            file_bytes = await file.read()
-            image = await run_in_threadpool(process_image_from_upload, file_bytes)
-            if image is not None:
-                images.append(image)
+    """
+    List face embeddings (Admin+ only)
+    """
+    query = db.query(FaceEmbeddingModel).filter(FaceEmbeddingModel.is_active == True)
+    
+    if employee_id:
+        query = query.filter(FaceEmbeddingModel.employee_id == employee_id)
+    
+    embeddings = query.all()
+    return embeddings
 
-        success = await run_in_threadpool(
-            enroller.enroll_from_images,
-            employee_id,
-            employee_name,
-            images,
-            update_existing
+@router.get("/{embedding_id}", response_model=FaceEmbedding)
+async def get_embedding(
+    embedding_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
+):
+    """
+    Get specific face embedding (Admin+ only)
+    """
+    embedding = db.query(FaceEmbeddingModel).filter(
+        FaceEmbeddingModel.id == embedding_id
+    ).first()
+    
+    if not embedding:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Face embedding not found"
         )
-        return EnrollmentResponse(success=success, message="Enrollment completed")
+    
+    return embedding
 
-    except Exception as e:
-        logger.exception("Error during employee enrollment")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.post("/add/", response_model=EnrollmentResponse)
-async def add_embedding(
-    employee_id: str = Form(...),
-    file: UploadFile = File(...),
-    _=Depends(require_admin),
-    enroller: FaceEnroller = Depends(EnrollerSingleton.get_instance)
+@router.delete("/{embedding_id}", response_model=MessageResponse)
+async def delete_embedding(
+    embedding_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
 ):
-    try:
-        file_bytes = await file.read()
-        image = await run_in_threadpool(process_image_from_upload, file_bytes)
+    """
+    Delete face embedding (Admin+ only)
+    """
+    embedding = db.query(FaceEmbeddingModel).filter(
+        FaceEmbeddingModel.id == embedding_id
+    ).first()
+    
+    if not embedding:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Face embedding not found"
+        )
+    
+    # Get employee name for response
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == embedding.employee_id
+    ).first()
+    
+    # Soft delete
+    embedding.is_active = False
+    db.commit()
+    
+    employee_name = employee.name if employee else "Unknown"
+    return MessageResponse(
+        message=f"Face embedding deleted for employee '{employee_name}'"
+    )
 
-        if image is None:
-            raise HTTPException(status_code=400, detail="Invalid image format")
-
-        success = await run_in_threadpool(enroller.add_embedding, employee_id, image)
-        return EnrollmentResponse(success=success, message="Embedding added")
-
-    except Exception as e:
-        logger.exception("Error adding embedding")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.delete("/delete_all/{employee_id}", response_model=EnrollmentResponse)
-async def delete_all_embeddings(
+@router.get("/employee/{employee_id}", response_model=List[FaceEmbedding])
+async def get_employee_embeddings(
     employee_id: str,
-    _=Depends(require_admin),
-    enroller: FaceEnroller = Depends(EnrollerSingleton.get_instance)
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
 ):
-    try:
-        success = await run_in_threadpool(enroller.remove_all_embeddings, employee_id)
-        return EnrollmentResponse(success=success, message="All embeddings deleted")
-    except Exception as e:
-        logger.exception("Error deleting embeddings")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    """
+    Get all face embeddings for a specific employee (Admin+ only)
+    """
+    # Check if employee exists
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == employee_id
+    ).first()
+    
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found"
+        )
+    
+    embeddings = db.query(FaceEmbeddingModel).filter(
+        FaceEmbeddingModel.employee_id == employee_id,
+        FaceEmbeddingModel.is_active == True
+    ).all()
+    
+    return embeddings
 
-
-@router.post("/archive_all/{employee_id}", response_model=EnrollmentResponse)
-async def archive_all_embeddings(
+@router.delete("/employee/{employee_id}/all", response_model=MessageResponse)
+async def delete_all_employee_embeddings(
     employee_id: str,
-    _=Depends(require_admin),
-    enroller: FaceEnroller = Depends(EnrollerSingleton.get_instance)
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
 ):
-    try:
-        success = await run_in_threadpool(enroller.archive_all_embeddings, employee_id)
-        return EnrollmentResponse(success=success, message="All embeddings archived")
-    except Exception as e:
-        logger.exception("Error archiving embeddings")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    """
+    Delete all face embeddings for a specific employee (Admin+ only)
+    """
+    # Check if employee exists
+    employee = db.query(EmployeeModel).filter(
+        EmployeeModel.employee_id == employee_id
+    ).first()
+    
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found"
+        )
+    
+    # Soft delete all embeddings
+    embeddings = db.query(FaceEmbeddingModel).filter(
+        FaceEmbeddingModel.employee_id == employee_id,
+        FaceEmbeddingModel.is_active == True
+    ).all()
+    
+    if not embeddings:
+        return MessageResponse(
+            message=f"No active face embeddings found for employee '{employee.name}'"
+        )
+    
+    for embedding in embeddings:
+        embedding.is_active = False
+    
+    db.commit()
+    
+    return MessageResponse(
+        message=f"All face embeddings deleted for employee '{employee.name}' ({len(embeddings)} embeddings)"
+    )
+
+@router.get("/stats/summary")
+async def get_embeddings_summary(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin_or_above)
+):
+    """
+    Get face embeddings statistics (Admin+ only)
+    """
+    total_embeddings = db.query(FaceEmbeddingModel).filter(
+        FaceEmbeddingModel.is_active == True
+    ).count()
+    
+    total_employees = db.query(EmployeeModel).filter(
+        EmployeeModel.is_active == True
+    ).count()
+    
+    employees_with_embeddings = db.query(FaceEmbeddingModel.employee_id).filter(
+        FaceEmbeddingModel.is_active == True
+    ).distinct().count()
+    
+    employees_without_embeddings = total_employees - employees_with_embeddings
+    
+    return {
+        "total_embeddings": total_embeddings,
+        "total_employees": total_employees,
+        "employees_with_embeddings": employees_with_embeddings,
+        "employees_without_embeddings": employees_without_embeddings,
+        "average_embeddings_per_employee": round(total_embeddings / max(employees_with_embeddings, 1), 2)
+    }

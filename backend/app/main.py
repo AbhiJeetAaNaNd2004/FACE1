@@ -1,35 +1,37 @@
+"""
+Face Recognition Attendance System API
+A FastAPI-based backend for face recognition attendance tracking
+"""
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from contextlib import asynccontextmanager
 import time
+import logging
 
-from routers import streaming, embeddings, employees, attendance, auth
+from app.routers import auth, employees, attendance, embeddings, streaming
 from app.config import settings
-from utils.logging import setup_logging, get_logger, log_request
-from tasks.camera_tasks import start_background_monitoring, stop_background_monitoring
 from db.db_config import create_tables
 
 # Setup logging
-setup_logging()
-logger = get_logger(__name__)
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown events."""
-    logger.info("🚀 Starting Face Tracking System API")
+    logger.info("🚀 Starting Face Recognition Attendance System API")
     
     try:
         # Initialize database tables
         create_tables()
         logger.info("✅ Database tables initialized")
         
-        # Start background camera monitoring if enabled
-        if settings.ENVIRONMENT != "testing":
-            start_background_monitoring()
-            logger.info("✅ Background camera monitoring started")
-        
-        logger.info("🎯 Face Tracking System API is ready!")
+        logger.info("🎯 Face Recognition Attendance System API is ready!")
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize application: {e}")
@@ -38,16 +40,11 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown procedures
-    logger.info("🛑 Shutting down Face Tracking System API")
-    try:
-        stop_background_monitoring()
-        logger.info("✅ Background monitoring stopped")
-    except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
+    logger.info("🛑 Shutting down Face Recognition Attendance System API")
 
 app = FastAPI(
-    title="Face Tracking System API",
-    description="Professional backend for face detection, recognition, and attendance tracking",
+    title="Face Recognition Attendance System",
+    description="Professional backend for face recognition-based attendance tracking with role-based access control",
     version="1.0.0",
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
@@ -61,12 +58,8 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     process_time = time.time() - start_time
     
-    log_request(
-        logger=logger,
-        method=request.method,
-        path=request.url.path,
-        status_code=response.status_code,
-        duration=process_time
+    logger.info(
+        f"{request.method} {request.url.path} - {response.status_code} - {process_time:.4f}s"
     )
     
     return response
@@ -89,12 +82,26 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router)
-app.include_router(streaming.router)
-app.include_router(embeddings.router)
 app.include_router(employees.router)
 app.include_router(attendance.router)
-
+app.include_router(embeddings.router)
+app.include_router(streaming.router)
 
 @app.get("/")
 async def root():
-    return {"message": "Face Tracking System API Running"}
+    """Root endpoint with system information"""
+    return {
+        "message": "Face Recognition Attendance System API",
+        "version": "1.0.0",
+        "status": "running",
+        "docs_url": "/docs" if settings.DEBUG else None
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "environment": settings.ENVIRONMENT
+    }
