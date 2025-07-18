@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Recognition Attendance System</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <!-- Main Application Container -->
+    <div id="app" class="app-container" style="display: none;">
+        
+        <!-- Login Page -->
+        <div id="login-page" class="page active">
+            <div class="login-container">
+                <div class="login-card">
+                    <div class="login-header">
+                        <i class="fas fa-user-shield"></i>
+                        <h1>Face Recognition Attendance System</h1>
+                        <p>Please sign in to continue</p>
+                    </div>
+                    
+                    <form id="login-form" class="login-form">
+                        <div class="form-group">
+                            <label for="username">Username</label>
+                            <input type="text" id="username" name="username" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="password">Password</label>
+                            <input type="password" id="password" name="password" required>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-sign-in-alt"></i>
+                            Sign In
+                        </button>
+                    </form>
+                    
+                    <div id="login-error" class="error-message" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Layout -->
+        <div id="dashboard-page" class="page">
+            <!-- Navigation Header -->
+            <header class="navbar">
+                <div class="navbar-content">
+                    <div class="navbar-brand">
+                        <i class="fas fa-user-shield"></i>
+                        <span>Attendance System</span>
+                    </div>
+                    
+                    <div class="navbar-user">
+                        <span id="user-name" class="user-name"></span>
+                        <span id="user-role" class="user-role"></span>
+                        <button id="logout-btn" class="btn btn-ghost">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Sidebar Navigation -->
+            <aside class="sidebar">
+                <nav class="sidebar-nav">
+                    <!-- Employee Navigation Items -->
+                    <div class="nav-section" data-roles="employee,admin,super_admin">
+                        <h3>Personal</h3>
+                        <a href="#" class="nav-item" data-page="my-attendance">
+                            <i class="fas fa-calendar-check"></i>
+                            <span>My Attendance</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="my-profile">
+                            <i class="fas fa-user"></i>
+                            <span>My Profile</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="present-employees">
+                            <i class="fas fa-users"></i>
+                            <span>Present Today</span>
+                        </a>
+                    </div>
+
+                    <!-- Admin Navigation Items -->
+                    <div class="nav-section" data-roles="admin,super_admin">
+                        <h3>Employee Management</h3>
+                        <a href="#" class="nav-item" data-page="employees">
+                            <i class="fas fa-address-book"></i>
+                            <span>All Employees</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="enroll-employee">
+                            <i class="fas fa-user-plus"></i>
+                            <span>Enroll Employee</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="attendance-records">
+                            <i class="fas fa-clipboard-list"></i>
+                            <span>Attendance Records</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="face-embeddings">
+                            <i class="fas fa-face-smile"></i>
+                            <span>Face Embeddings</span>
+                        </a>
+                    </div>
+
+                    <div class="nav-section" data-roles="admin,super_admin">
+                        <h3>System Operations</h3>
+                        <a href="#" class="nav-item" data-page="cameras">
+                            <i class="fas fa-video"></i>
+                            <span>Camera Management</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="system-control">
+                            <i class="fas fa-cogs"></i>
+                            <span>System Control</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="live-feed">
+                            <i class="fas fa-broadcast-tower"></i>
+                            <span>Live Feed</span>
+                        </a>
+                    </div>
+
+                    <!-- Super Admin Navigation Items -->
+                    <div class="nav-section" data-roles="super_admin">
+                        <h3>Administration</h3>
+                        <a href="#" class="nav-item" data-page="user-management">
+                            <i class="fas fa-users-cog"></i>
+                            <span>User Management</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="camera-discovery">
+                            <i class="fas fa-search"></i>
+                            <span>Camera Discovery</span>
+                        </a>
+                        <a href="#" class="nav-item" data-page="system-logs">
+                            <i class="fas fa-file-alt"></i>
+                            <span>System Logs</span>
+                        </a>
+                    </div>
+                </nav>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="main-content">
+                <!-- Dashboard Home -->
+                <div id="dashboard-home" class="content-page active">
+                    <div class="page-header">
+                        <h1>Dashboard</h1>
+                        <p>Welcome to the Face Recognition Attendance System</p>
+                    </div>
+                    
+                    <div class="dashboard-grid">
+                        <div class="dashboard-card">
+                            <div class="card-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3 id="total-employees">0</h3>
+                                <p>Total Employees</p>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-card">
+                            <div class="card-icon">
+                                <i class="fas fa-user-check"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3 id="present-today">0</h3>
+                                <p>Present Today</p>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-card">
+                            <div class="card-icon">
+                                <i class="fas fa-video"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3 id="active-cameras">0</h3>
+                                <p>Active Cameras</p>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-card">
+                            <div class="card-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3 id="attendance-rate">0%</h3>
+                                <p>Attendance Rate</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Content pages will be dynamically loaded here -->
+                <div id="my-attendance" class="content-page"></div>
+                <div id="my-profile" class="content-page"></div>
+                <div id="present-employees" class="content-page"></div>
+                <div id="employees" class="content-page"></div>
+                <div id="enroll-employee" class="content-page"></div>
+                <div id="attendance-records" class="content-page"></div>
+                <div id="face-embeddings" class="content-page"></div>
+                <div id="cameras" class="content-page"></div>
+                <div id="system-control" class="content-page"></div>
+                <div id="live-feed" class="content-page"></div>
+                <div id="user-management" class="content-page"></div>
+                <div id="camera-discovery" class="content-page"></div>
+                <div id="system-logs" class="content-page"></div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmation-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="confirmation-title">Confirm Action</h3>
+            </div>
+            <div class="modal-body">
+                <p id="confirmation-message">Are you sure you want to proceed?</p>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+                <button id="confirm-btn" class="btn btn-primary">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Modal -->
+    <div id="loading-modal" class="modal">
+        <div class="modal-content loading">
+            <div class="loading-spinner"></div>
+            <p id="loading-message">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/app.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/router.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/pages/employee.js"></script>
+    <script src="js/pages/admin.js"></script>
+    <script src="js/pages/superadmin.js"></script>
+    <script src="js/pages/attendance.js"></script>
+    <script src="js/pages/cameras.js"></script>
+    <script src="js/pages/system.js"></script>
+</body>
+</html>

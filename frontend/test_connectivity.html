@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frontend-Backend Connectivity Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .loading {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔗 Frontend-Backend Connectivity Test</h1>
+    
+    <div class="test-section">
+        <h2>Backend Health Check</h2>
+        <button onclick="testHealthCheck()">Test Health Check</button>
+        <div id="health-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Authentication Test</h2>
+        <button onclick="testLogin()">Test Login (test/test)</button>
+        <button onclick="testAdminLogin()">Test Admin Login (admin/admin)</button>
+        <div id="auth-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Protected Endpoints Test</h2>
+        <button onclick="testProtectedEndpoints()">Test Protected Endpoints</button>
+        <div id="protected-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Complete Frontend Flow Test</h2>
+        <button onclick="testFrontendFlow()">Test Complete Flow</button>
+        <div id="frontend-result"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let authToken = null;
+
+        function setResult(elementId, content, className = '') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = content;
+            element.className = `test-section ${className}`;
+        }
+
+        function setLoading(elementId, message = 'Testing...') {
+            setResult(elementId, `<p>⏳ ${message}</p>`, 'loading');
+        }
+
+        async function testHealthCheck() {
+            setLoading('health-result');
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    setResult('health-result', `
+                        <h3>✅ Health Check Passed</h3>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'success');
+                } else {
+                    setResult('health-result', `
+                        <h3>❌ Health Check Failed</h3>
+                        <p>Status: ${response.status}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'error');
+                }
+            } catch (error) {
+                setResult('health-result', `
+                    <h3>❌ Health Check Error</h3>
+                    <p>Error: ${error.message}</p>
+                `, 'error');
+            }
+        }
+
+        async function testLogin() {
+            setLoading('auth-result', 'Testing login...');
+            try {
+                const formData = new FormData();
+                formData.append('username', 'test');
+                formData.append('password', 'test');
+
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.access_token) {
+                    authToken = data.access_token;
+                    setResult('auth-result', `
+                        <h3>✅ Login Successful</h3>
+                        <p>Token: ${data.access_token.substring(0, 20)}...</p>
+                        <p>User Role: ${data.user.role}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'success');
+                } else {
+                    setResult('auth-result', `
+                        <h3>❌ Login Failed</h3>
+                        <p>Status: ${response.status}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'error');
+                }
+            } catch (error) {
+                setResult('auth-result', `
+                    <h3>❌ Login Error</h3>
+                    <p>Error: ${error.message}</p>
+                `, 'error');
+            }
+        }
+
+        async function testAdminLogin() {
+            setLoading('auth-result', 'Testing admin login...');
+            try {
+                const formData = new FormData();
+                formData.append('username', 'admin');
+                formData.append('password', 'admin');
+
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.access_token) {
+                    authToken = data.access_token;
+                    setResult('auth-result', `
+                        <h3>✅ Admin Login Successful</h3>
+                        <p>Token: ${data.access_token.substring(0, 20)}...</p>
+                        <p>User Role: ${data.user.role}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'success');
+                } else {
+                    setResult('auth-result', `
+                        <h3>❌ Admin Login Failed</h3>
+                        <p>Status: ${response.status}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'error');
+                }
+            } catch (error) {
+                setResult('auth-result', `
+                    <h3>❌ Admin Login Error</h3>
+                    <p>Error: ${error.message}</p>
+                `, 'error');
+            }
+        }
+
+        async function testProtectedEndpoints() {
+            if (!authToken) {
+                setResult('protected-result', `
+                    <h3>⚠️ No Auth Token</h3>
+                    <p>Please login first to test protected endpoints</p>
+                `, 'error');
+                return;
+            }
+
+            setLoading('protected-result', 'Testing protected endpoints...');
+            
+            const endpoints = [
+                '/auth/me',
+                '/employees/me',
+                '/attendance/my-records',
+                '/employees/present'
+            ];
+
+            let results = [];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(`${API_URL}${endpoint}`, {
+                        headers: {
+                            'Authorization': `Bearer ${authToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    const data = await response.json();
+                    results.push({
+                        endpoint,
+                        status: response.status,
+                        success: response.ok,
+                        data: data
+                    });
+                } catch (error) {
+                    results.push({
+                        endpoint,
+                        status: 'ERROR',
+                        success: false,
+                        error: error.message
+                    });
+                }
+            }
+
+            const successCount = results.filter(r => r.success).length;
+            const resultHtml = `
+                <h3>${successCount === endpoints.length ? '✅' : '⚠️'} Protected Endpoints Test</h3>
+                <p>Successful: ${successCount}/${endpoints.length}</p>
+                ${results.map(result => `
+                    <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <strong>${result.endpoint}</strong> - 
+                        <span style="color: ${result.success ? 'green' : 'red'}">
+                            ${result.success ? 'SUCCESS' : 'FAILED'} (${result.status})
+                        </span>
+                        ${result.data ? `<pre>${JSON.stringify(result.data, null, 2)}</pre>` : ''}
+                        ${result.error ? `<p style="color: red;">Error: ${result.error}</p>` : ''}
+                    </div>
+                `).join('')}
+            `;
+
+            setResult('protected-result', resultHtml, successCount === endpoints.length ? 'success' : 'error');
+        }
+
+        async function testFrontendFlow() {
+            setLoading('frontend-result', 'Testing complete frontend flow...');
+            
+            try {
+                // Load frontend JavaScript modules
+                const apiService = new APIService('http://localhost:8000');
+                const authService = new AuthService(apiService);
+
+                // Test login
+                const loginResult = await authService.login({
+                    username: 'test',
+                    password: 'test'
+                });
+
+                if (!loginResult.success) {
+                    throw new Error('Login failed: ' + loginResult.message);
+                }
+
+                // Test API calls
+                const user = await apiService.getCurrentUser();
+                const employee = await apiService.getMyEmployeeData();
+                const attendance = await apiService.getMyAttendance();
+
+                setResult('frontend-result', `
+                    <h3>✅ Frontend Flow Test Successful</h3>
+                    <h4>Login Result:</h4>
+                    <pre>${JSON.stringify(loginResult, null, 2)}</pre>
+                    <h4>User Data:</h4>
+                    <pre>${JSON.stringify(user, null, 2)}</pre>
+                    <h4>Employee Data:</h4>
+                    <pre>${JSON.stringify(employee, null, 2)}</pre>
+                    <h4>Attendance Data:</h4>
+                    <pre>${JSON.stringify(attendance, null, 2)}</pre>
+                `, 'success');
+
+            } catch (error) {
+                setResult('frontend-result', `
+                    <h3>❌ Frontend Flow Test Failed</h3>
+                    <p>Error: ${error.message}</p>
+                `, 'error');
+            }
+        }
+
+        // Auto-run health check on page load
+        window.onload = () => {
+            testHealthCheck();
+        };
+    </script>
+
+    <!-- Load frontend modules for testing -->
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+</body>
+</html>
