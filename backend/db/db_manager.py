@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
-from db_config import SessionLocal
-from db_models import Employee, FaceEmbedding, AttendanceRecord, Role, TrackingRecord, SystemLog, User, CameraConfig, Tripwire
+from .db_config import SessionLocal
+from .db_models import Employee, FaceEmbedding, AttendanceLog, TrackingRecord, SystemLog, UserAccount, CameraConfig, Tripwire
 import numpy as np
 import pickle
 import logging
@@ -173,7 +173,7 @@ class DatabaseManager:
             session = self.Session()
             
             # Create attendance record
-            attendance_record = AttendanceRecord(
+            attendance_record = AttendanceLog(
                 employee_id=employee_id,
                 camera_id=camera_id,
                 event_type=event_type,
@@ -544,18 +544,18 @@ class DatabaseManager:
             if session:
                 session.close()
 
-    def get_attendance_records(self, employee_id: str = None, start_date: datetime = None, end_date: datetime = None, limit: int = 100) -> List[AttendanceRecord]:
+    def get_attendance_records(self, employee_id: str = None, start_date: datetime = None, end_date: datetime = None, limit: int = 100) -> List[AttendanceLog]:
         session = None
         try:
             session = self.Session()
-            query = session.query(AttendanceRecord).filter(AttendanceRecord.is_valid == True)
+            query = session.query(AttendanceLog).filter(AttendanceLog.is_valid == True)
             if employee_id:
-                query = query.filter(AttendanceRecord.employee_id == employee_id)
+                query = query.filter(AttendanceLog.employee_id == employee_id)
             if start_date:
-                query = query.filter(AttendanceRecord.timestamp >= start_date)
+                query = query.filter(AttendanceLog.timestamp >= start_date)
             if end_date:
-                query = query.filter(AttendanceRecord.timestamp <= end_date)
-            query = query.order_by(desc(AttendanceRecord.timestamp))
+                query = query.filter(AttendanceLog.timestamp <= end_date)
+            query = query.order_by(desc(AttendanceLog.timestamp))
             if limit:
                 query = query.limit(limit)
             return query.all()
@@ -566,17 +566,17 @@ class DatabaseManager:
             if session:
                 session.close()
 
-    def get_latest_attendance_by_employee(self, employee_id: str, hours_back: int = 10) -> Optional[AttendanceRecord]:
+    def get_latest_attendance_by_employee(self, employee_id: str, hours_back: int = 10) -> Optional[AttendanceLog]:
         session = None
         try:
             session = self.Session()
             time_threshold = datetime.now() - timedelta(hours=hours_back)
-            return session.query(AttendanceRecord).filter(
+            return session.query(AttendanceLog).filter(
                 and_(
-                    AttendanceRecord.employee_id == employee_id,
-                    AttendanceRecord.timestamp >= time_threshold,
-                    AttendanceRecord.is_valid == True)
-            ).order_by(desc(AttendanceRecord.timestamp)).first()
+                    AttendanceLog.employee_id == employee_id,
+                    AttendanceLog.timestamp >= time_threshold,
+                    AttendanceLog.is_valid == True)
+            ).order_by(desc(AttendanceLog.timestamp)).first()
         except Exception as e:
             self.logger.error(f"Error getting latest attendance for {employee_id}: {e}")
             return None
@@ -593,7 +593,7 @@ class DatabaseManager:
             if not employee:
                 return False
             session.query(FaceEmbedding).filter(FaceEmbedding.employee_id == employee_id).delete()
-            session.query(AttendanceRecord).filter(AttendanceRecord.employee_id == employee_id).delete()
+            session.query(AttendanceLog).filter(AttendanceLog.employee_id == employee_id).delete()
             session.delete(employee)
             session.commit()
             return True
@@ -654,11 +654,11 @@ class DatabaseManager:
         finally:
             if session:
                 session.close()
-    def get_user_by_username(self, username: str) -> Optional[User]:
+    def get_user_by_username(self, username: str) -> Optional[UserAccount]:
         session = None
         try:
             session = self.Session()
-            return session.query(User).filter(User.username == username).first()
+            return session.query(UserAccount).filter(UserAccount.username == username).first()
         except Exception as e:
             self.logger.error(f"Error fetching user {username}: {e}")
             return None
@@ -668,7 +668,7 @@ class DatabaseManager:
     def update_user_status(self, user_id: int, new_status: str) -> bool:
         session = self.Session()
         try:
-            user = session.query(User).filter(User.id == user_id).first()
+            user = session.query(UserAccount).filter(UserAccount.id == user_id).first()
             if not user:
                 return False
             user.status = new_status

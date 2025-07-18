@@ -19,10 +19,10 @@ from datetime import datetime
 import queue
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from backend.db.db_manager import DatabaseManager
-from backend.db.db_config import create_tables
-from backend.db.db_models import Employee, FaceEmbedding, AttendanceRecord
-from backend.utils.camera_config_loader import load_active_camera_configs, CameraConfig as DBCameraConfig, TripwireConfig as DBTripwireConfig
+from db.db_manager import DatabaseManager
+from db.db_config import create_tables
+from db.db_models import Employee, FaceEmbedding, AttendanceLog
+from utils.camera_config_loader import load_active_camera_configs, CameraConfig as DBCameraConfig, TripwireConfig as DBTripwireConfig
 from datetime import timedelta
 
 # Global variables for Django integration
