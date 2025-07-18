@@ -539,9 +539,8 @@ class FaceTrackingSystem:
                             present_users_by_department[dept].append(emp_id)
             
             # Update other stats
-            # Load camera configurations from database
-        cameras = load_camera_configurations()
-        system_stats["cam_count"] = len(cameras)
+            cameras = load_camera_configurations()
+            system_stats["cam_count"] = len(cameras)
             system_stats["faces_detected"] = len(active_tracks)
             system_stats["attendance_count"] = len(latest_attendance)
             
@@ -815,10 +814,12 @@ class FaceTrackingSystem:
                 self.embeddings = []
                 self.labels = []
                 self.index = None
-            print("[INDEX REBUILD] FAISS index rebuilt with current active embeddings.")
+            log_message("[INDEX REBUILD] FAISS index rebuilt with current active embeddings.")
 
     def _initialize_multi_gpu_insightface(self):
-        gpu_ids = list(set([cam.gpu_id for cam in CAMERAS]))
+        # Load camera configurations from database
+        cameras = load_camera_configurations()
+        gpu_ids = list(set([cam.gpu_id for cam in cameras]))
         for gpu_id in gpu_ids:
             providers = ['CPUExecutionProvider']
             if torch.cuda.is_available() and gpu_id < torch.cuda.device_count():
@@ -831,7 +832,9 @@ class FaceTrackingSystem:
             self.apps[gpu_id].prepare(ctx_id=gpu_id, det_size=(416, 416), det_thresh=DET_THRESH)
 
     def _initialize_cameras(self):
-        for cam_config in CAMERAS:
+        # Load camera configurations from database
+        cameras = load_camera_configurations()
+        for cam_config in cameras:
             cam_id = cam_config.camera_id
             self.trackers[cam_id] = BYTETracker(
                 frame_rate=cam_config.fps,
