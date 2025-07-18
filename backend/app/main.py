@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import time
 import logging
 
-from app.routers import auth, employees, attendance, embeddings, streaming, cameras
+from app.routers import auth, employees, attendance, embeddings, streaming, cameras, system
 from app.config import settings
 from db.db_config import create_tables
 
@@ -87,6 +87,7 @@ app.include_router(attendance.router)
 app.include_router(embeddings.router)
 app.include_router(streaming.router)
 app.include_router(cameras.router)
+app.include_router(system.router)
 
 @app.get("/")
 async def root():
