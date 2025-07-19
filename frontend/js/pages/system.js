@@ -17,7 +17,20 @@ class SystemPage {
      */
     async loadSystemControl(container) {
         try {
-            const systemData = await this.api.getSystemStatus();
+            let systemData;
+            try {
+                systemData = await this.api.getSystemStatus();
+            } catch (error) {
+                console.warn('Failed to get system status:', error);
+                systemData = { 
+                    data: { 
+                        is_running: false, 
+                        uptime: 0, 
+                        faces_detected: 0,
+                        recognition_rate: 0 
+                    } 
+                };
+            }
             
             const html = `
                 <div class="page-header">
@@ -346,7 +359,7 @@ class SystemPage {
                                 <span class="confidence">95.2% confidence</span>
                             </div>
                             <div class="detection-thumbnail">
-                                <img src="/images/detection-placeholder.png" alt="Detection">
+                                <img src="/images/detection-placeholder.svg" alt="Detection">
                             </div>
                         </div>
                         <div class="detection-item">
@@ -356,7 +369,7 @@ class SystemPage {
                                 <span class="confidence">87.1% confidence</span>
                             </div>
                             <div class="detection-thumbnail">
-                                <img src="/images/detection-placeholder.png" alt="Detection">
+                                <img src="/images/detection-placeholder.svg" alt="Detection">
                             </div>
                         </div>
                     </div>
@@ -448,10 +461,14 @@ class SystemPage {
      * Start system monitoring
      */
     startSystemMonitoring() {
+        // Initial status refresh
+        this.refreshSystemStatus();
+        
         this.systemMonitorInterval = setInterval(async () => {
             try {
                 const systemData = await this.api.getSystemStatus();
                 this.updateSystemMetrics(systemData);
+                this.refreshSystemStatus();
             } catch (error) {
                 console.error('Failed to update system metrics:', error);
             }
@@ -545,6 +562,11 @@ class SystemPage {
         const backupSystemBtn = container.querySelector('#backup-system');
         if (backupSystemBtn) {
             backupSystemBtn.addEventListener('click', this.backupSystem.bind(this));
+        }
+
+        const systemLogsBtn = container.querySelector('#system-logs');
+        if (systemLogsBtn) {
+            systemLogsBtn.addEventListener('click', this.showSystemLogs.bind(this));
         }
     }
 
@@ -652,7 +674,71 @@ class SystemPage {
      */
     async handleServiceControl(action) {
         console.log('Service control action:', action);
-        // Implementation for service control
+        
+        try {
+            let result;
+            const button = document.getElementById(action);
+            
+            // Disable button and show loading
+            if (button) {
+                button.disabled = true;
+                const originalText = button.innerHTML;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+                
+                // Restore button after operation
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }, 3000);
+            }
+            
+            switch (action) {
+                case 'start-face-detection':
+                    result = await this.api.startFaceDetectionSystem();
+                    if (result.success) {
+                        this.ui.showNotification('Face detection system started successfully', 'success');
+                        this.updateServiceStatus('face-detection', 'running');
+                    } else {
+                        throw new Error(result.message || 'Failed to start face detection system');
+                    }
+                    break;
+                    
+                case 'stop-face-detection':
+                    result = await this.api.stopFaceDetectionSystem();
+                    if (result.success) {
+                        this.ui.showNotification('Face detection system stopped successfully', 'success');
+                        this.updateServiceStatus('face-detection', 'stopped');
+                    } else {
+                        throw new Error(result.message || 'Failed to stop face detection system');
+                    }
+                    break;
+                    
+                case 'restart-face-detection':
+                    // Stop first, then start
+                    await this.api.stopFaceDetectionSystem();
+                    setTimeout(async () => {
+                        result = await this.api.startFaceDetectionSystem();
+                        if (result.success) {
+                            this.ui.showNotification('Face detection system restarted successfully', 'success');
+                            this.updateServiceStatus('face-detection', 'running');
+                        }
+                    }, 2000);
+                    break;
+                    
+                case 'start-camera-service':
+                case 'stop-camera-service':
+                case 'restart-camera-service':
+                    this.ui.showNotification('Camera service control is managed automatically by the face detection system', 'info');
+                    break;
+                    
+                default:
+                    console.warn('Unknown service control action:', action);
+            }
+            
+        } catch (error) {
+            console.error('Service control failed:', error);
+            this.ui.showNotification(error.message || 'Service control operation failed', 'error');
+        }
     }
 
     async saveSystemSettings() {
@@ -674,6 +760,149 @@ class SystemPage {
     async backupSystem() {
         console.log('Backup system');
         // Implementation for backing up system
+    }
+    
+    async showSystemLogs() {
+        try {
+            const logsData = await this.api.getSystemLogs();
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal fade show';
+            modal.style.display = 'block';
+            modal.innerHTML = `
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">System Logs</h5>
+                            <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="logs-controls mb-3">
+                                <button id="refresh-logs" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-refresh"></i> Refresh
+                                </button>
+                                <button id="clear-logs" class="btn btn-sm btn-warning">
+                                    <i class="fas fa-trash"></i> Clear Logs
+                                </button>
+                                <select id="log-level-filter" class="form-control form-control-sm" style="width: auto; display: inline-block;">
+                                    <option value="">All Levels</option>
+                                    <option value="ERROR">Error</option>
+                                    <option value="WARNING">Warning</option>
+                                    <option value="INFO">Info</option>
+                                    <option value="DEBUG">Debug</option>
+                                </select>
+                            </div>
+                            <div id="logs-container" class="logs-container" style="height: 400px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 5px; font-family: monospace; font-size: 12px;">
+                                ${this.formatLogs(logsData.logs || [])}
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Close</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-backdrop fade show"></div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Setup logs controls
+            modal.querySelector('#refresh-logs').addEventListener('click', async () => {
+                const refreshedLogs = await this.api.getSystemLogs();
+                modal.querySelector('#logs-container').innerHTML = this.formatLogs(refreshedLogs.logs || []);
+            });
+            
+            modal.querySelector('#log-level-filter').addEventListener('change', (e) => {
+                const level = e.target.value;
+                const logs = logsData.logs || [];
+                const filteredLogs = level ? logs.filter(log => log.includes(level)) : logs;
+                modal.querySelector('#logs-container').innerHTML = this.formatLogs(filteredLogs);
+            });
+            
+        } catch (error) {
+            console.error('Failed to load system logs:', error);
+            this.ui.showNotification('Failed to load system logs', 'error');
+        }
+    }
+    
+    formatLogs(logs) {
+        if (!logs || logs.length === 0) {
+            return '<div style="color: #666; text-align: center; padding: 20px;">No logs available</div>';
+        }
+        
+        return logs.map(log => {
+            const logLevel = this.getLogLevel(log);
+            const color = this.getLogColor(logLevel);
+            return `<div style="color: ${color}; margin-bottom: 5px;">${log}</div>`;
+        }).join('');
+    }
+    
+    getLogLevel(log) {
+        if (log.includes('ERROR')) return 'ERROR';
+        if (log.includes('WARNING')) return 'WARNING';
+        if (log.includes('INFO')) return 'INFO';
+        if (log.includes('DEBUG')) return 'DEBUG';
+        return 'INFO';
+    }
+    
+    getLogColor(level) {
+        switch (level) {
+            case 'ERROR': return '#dc3545';
+            case 'WARNING': return '#ffc107';
+            case 'INFO': return '#17a2b8';
+            case 'DEBUG': return '#6c757d';
+            default: return '#333';
+        }
+    }
+    
+    updateServiceStatus(service, status) {
+        const statusIndicator = document.getElementById(`${service}-status`);
+        const startButton = document.getElementById(`start-${service}`);
+        const stopButton = document.getElementById(`stop-${service}`);
+        
+        if (statusIndicator) {
+            statusIndicator.className = `status-indicator status-${status}`;
+            statusIndicator.innerHTML = `<i class="fas fa-circle"></i> ${status === 'running' ? 'Running' : 'Stopped'}`;
+        }
+        
+        if (startButton && stopButton) {
+            if (status === 'running') {
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            } else {
+                startButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        }
+    }
+    
+    async refreshSystemStatus() {
+        try {
+            const systemData = await this.api.getSystemStatus();
+            if (systemData.success && systemData.data) {
+                const isRunning = systemData.data.is_running;
+                this.updateServiceStatus('face-detection', isRunning ? 'running' : 'stopped');
+                
+                // Update stats
+                if (document.getElementById('faces-detected-count')) {
+                    document.getElementById('faces-detected-count').textContent = 
+                        systemData.data.faces_detected || '0';
+                }
+                if (document.getElementById('recognition-rate')) {
+                    document.getElementById('recognition-rate').textContent = 
+                        `${systemData.data.recognition_rate || 0}%`;
+                }
+                if (document.getElementById('face-detection-uptime')) {
+                    const uptime = systemData.data.uptime || 0;
+                    const hours = Math.floor(uptime / 3600);
+                    const minutes = Math.floor((uptime % 3600) / 60);
+                    document.getElementById('face-detection-uptime').textContent = 
+                        `${hours}h ${minutes}m`;
+                }
+            }
+        } catch (error) {
+            console.error('Failed to refresh system status:', error);
+        }
     }
 
     changeLayout(layout) {

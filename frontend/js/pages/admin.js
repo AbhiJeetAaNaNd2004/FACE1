@@ -402,23 +402,172 @@ class AdminPage {
 
     async handleEnrollmentSubmit(e) {
         e.preventDefault();
-        // Implementation for enrollment submission
-        console.log('Submit enrollment');
+        
+        const form = e.target;
+        const formData = new FormData(form);
+        const submitButton = form.querySelector('#submit-enrollment');
+        
+        // Validate form data
+        const employeeData = {
+            employee_id: formData.get('employee_id'),
+            name: formData.get('name'),
+            email: formData.get('email'),
+            phone: formData.get('phone'),
+            department: formData.get('department'),
+            role: formData.get('position'),
+            date_joined: new Date().toISOString().split('T')[0]
+        };
+        
+        // Validate required fields
+        if (!employeeData.employee_id || !employeeData.name || !employeeData.email || !employeeData.department) {
+            this.ui.showNotification('Please fill in all required fields', 'error');
+            return;
+        }
+        
+        // Check if photo was captured
+        if (!this.capturedImageData) {
+            this.ui.showNotification('Please capture a photo for face enrollment', 'error');
+            return;
+        }
+        
+        submitButton.disabled = true;
+        submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enrolling...';
+        
+        try {
+            const enrollmentData = {
+                employee: employeeData,
+                image_data: this.capturedImageData.split(',')[1] // Remove data:image/jpeg;base64, prefix
+            };
+            
+            const result = await this.api.createEmployee(enrollmentData);
+            
+            if (result.success !== false) {
+                this.ui.showNotification('Employee enrolled successfully!', 'success');
+                form.reset();
+                this.clearCapturedPhoto();
+                // Navigate back to employees list
+                setTimeout(() => {
+                    this.app.modules.router.navigateTo('employees');
+                }, 1500);
+            } else {
+                throw new Error(result.message || 'Enrollment failed');
+            }
+            
+        } catch (error) {
+            console.error('Enrollment failed:', error);
+            this.ui.showNotification(error.message || 'Failed to enroll employee', 'error');
+        } finally {
+            submitButton.disabled = false;
+            submitButton.innerHTML = '<i class="fas fa-save"></i> Enroll Employee';
+        }
     }
 
     async startCamera() {
-        // Implementation for starting camera
-        console.log('Start camera');
+        try {
+            const video = document.getElementById('video-preview');
+            const startButton = document.getElementById('start-camera');
+            const captureButton = document.getElementById('capture-photo');
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    width: { ideal: 640 }, 
+                    height: { ideal: 480 } 
+                } 
+            });
+            
+            video.srcObject = stream;
+            this.videoStream = stream;
+            
+            startButton.style.display = 'none';
+            captureButton.disabled = false;
+            
+        } catch (error) {
+            console.error('Failed to start camera:', error);
+            this.ui.showNotification('Failed to access camera. Please check permissions.', 'error');
+        }
     }
 
     async capturePhoto() {
-        // Implementation for capturing photo
-        console.log('Capture photo');
+        try {
+            const video = document.getElementById('video-preview');
+            const canvas = document.getElementById('capture-canvas');
+            const captureButton = document.getElementById('capture-photo');
+            const retakeButton = document.getElementById('retake-photo');
+            const capturedPhotos = document.getElementById('captured-photos');
+            const submitButton = document.getElementById('submit-enrollment');
+            
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Draw the video frame to canvas
+            ctx.drawImage(video, 0, 0);
+            
+            // Convert to base64
+            this.capturedImageData = canvas.toDataURL('image/jpeg', 0.8);
+            
+            // Stop video stream
+            if (this.videoStream) {
+                this.videoStream.getTracks().forEach(track => track.stop());
+                this.videoStream = null;
+            }
+            
+            // Update UI
+            video.style.display = 'none';
+            canvas.style.display = 'block';
+            captureButton.style.display = 'none';
+            retakeButton.style.display = 'inline-block';
+            
+            capturedPhotos.innerHTML = '<p style="color: green;"><i class="fas fa-check"></i> Photo captured successfully!</p>';
+            
+            // Enable submit button
+            submitButton.disabled = false;
+            
+        } catch (error) {
+            console.error('Failed to capture photo:', error);
+            this.ui.showNotification('Failed to capture photo', 'error');
+        }
     }
 
     async retakePhoto() {
-        // Implementation for retaking photo
-        console.log('Retake photo');
+        const video = document.getElementById('video-preview');
+        const canvas = document.getElementById('capture-canvas');
+        const startButton = document.getElementById('start-camera');
+        const retakeButton = document.getElementById('retake-photo');
+        const capturedPhotos = document.getElementById('captured-photos');
+        const submitButton = document.getElementById('submit-enrollment');
+        
+        // Clear captured data
+        this.capturedImageData = null;
+        
+        // Reset UI
+        video.style.display = 'block';
+        canvas.style.display = 'none';
+        startButton.style.display = 'inline-block';
+        retakeButton.style.display = 'none';
+        
+        capturedPhotos.innerHTML = '<p>Capture 3-5 photos from different angles for better recognition</p>';
+        
+        // Disable submit button
+        submitButton.disabled = true;
+    }
+    
+    clearCapturedPhoto() {
+        this.capturedImageData = null;
+        
+        const video = document.getElementById('video-preview');
+        const canvas = document.getElementById('capture-canvas');
+        const startButton = document.getElementById('start-camera');
+        const captureButton = document.getElementById('capture-photo');
+        const retakeButton = document.getElementById('retake-photo');
+        const capturedPhotos = document.getElementById('captured-photos');
+        
+        if (video) video.style.display = 'block';
+        if (canvas) canvas.style.display = 'none';
+        if (startButton) startButton.style.display = 'inline-block';
+        if (captureButton) captureButton.disabled = true;
+        if (retakeButton) retakeButton.style.display = 'none';
+        if (capturedPhotos) capturedPhotos.innerHTML = '<p>Capture 3-5 photos from different angles for better recognition</p>';
     }
 
     async regenerateAllEmbeddings() {

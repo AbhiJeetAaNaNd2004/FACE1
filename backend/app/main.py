@@ -31,6 +31,15 @@ async def lifespan(app: FastAPI):
         create_tables()
         logger.info("✅ Database tables initialized")
         
+        # Auto-start face detection system if configured
+        if settings.DEBUG and hasattr(settings, 'AUTO_START_FTS') and settings.AUTO_START_FTS:
+            try:
+                from core.fts_system import start_tracking_service
+                start_tracking_service()
+                logger.info("✅ Face detection system auto-started")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to auto-start face detection system: {e}")
+        
         logger.info("🎯 Face Recognition Attendance System API is ready!")
         
     except Exception as e:
@@ -40,6 +49,13 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown procedures
+    try:
+        from core.fts_system import shutdown_tracking_service
+        shutdown_tracking_service()
+        logger.info("✅ Face detection system shut down")
+    except Exception as e:
+        logger.warning(f"⚠️ Error shutting down face detection system: {e}")
+    
     logger.info("🛑 Shutting down Face Recognition Attendance System API")
 
 app = FastAPI(

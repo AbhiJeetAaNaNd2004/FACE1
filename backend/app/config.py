@@ -19,10 +19,11 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
+    AUTO_START_FTS: bool = True
     
     # CORS Configuration
     FRONTEND_URL: str = "http://localhost:3000"
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://[::1]:3000,http://localhost:8080,http://127.0.0.1:8080"
     
     # Face Recognition Configuration
     FACE_RECOGNITION_TOLERANCE: float = 0.6
